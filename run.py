@@ -18,7 +18,7 @@ from app.web import create_app  # noqa: E402
 app = create_app()
 
 if __name__ == "__main__":
-    if "--sched" in sys.argv:
+    if "--no-sched" not in sys.argv:
         from app.scheduler import start_scheduler
 
         start_scheduler()

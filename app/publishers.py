@@ -1,10 +1,5 @@
 """社群發布模組。
 
-需求對應：
-- 2.1 支援 Facebook / Instagram / Threads / YouTube，並可自訂新增平台
-- 2.4 憑證以隱藏檔（~/.ai_news_hub/credentials）存放，使用時以環境變數讀取，
-      程式碼與資料庫均不出現明文金鑰。
-
 各平台憑證變數命名（{KEY} 為 platforms.credential_key，預設 FACEBOOK/INSTAGRAM/THREADS/YOUTUBE）：
   Facebook : {KEY}_PAGE_ID, {KEY}_PAGE_ACCESS_TOKEN
   Instagram: {KEY}_IG_USER_ID, {KEY}_ACCESS_TOKEN

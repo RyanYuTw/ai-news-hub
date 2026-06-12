@@ -1,0 +1,47 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s --max-time 30 -X POST http://localhost:11434/api/chat -H 'Content-Type: application/json' -d '{\"model\":\"qwen3.5:9b\",\"messages\":[{\"role\":\"user\",\"content\":\"將以下英文論文標題翻譯為一行繁體中文社群貼文標題（吸引人但忠於原意，不要加引號或任何說明）：\\\\n\\\\nAttention Is All You Need\"}],\"stream\":true,\"think\":false}')",
+      "Bash(mysql ai_news_hub -e \"SELECT s.name, COUNT\\(*\\) total, SUM\\(a.is_fulltext\\) fulltext, SUM\\(1-a.is_fulltext\\) summary_only FROM articles a JOIN source_sites s ON a.source_id=s.id GROUP BY s.name ORDER BY total DESC LIMIT 20;\")",
+      "Bash(sqlite3 ai_news.db \"SELECT s.name, COUNT\\(*\\) total, SUM\\(a.is_fulltext\\) fulltext, SUM\\(1-a.is_fulltext\\) summary_only FROM articles a JOIN source_sites s ON a.source_id=s.id GROUP BY s.name ORDER BY total DESC LIMIT 20;\")",
+      "Bash(sqlite3 /Users/ryanyu/Documents/AI/research/ai_news_hub/ai_news.db \"SELECT s.name, COUNT\\(*\\) total, SUM\\(a.is_fulltext\\) fulltext, SUM\\(1-a.is_fulltext\\) summary_only FROM articles a JOIN source_sites s ON a.source_id=s.id GROUP BY s.name ORDER BY total DESC LIMIT 20;\")",
+      "Bash(sqlite3 /Users/ryanyu/Documents/AI/research/ai_news_hub/ai_news.db \".tables\")",
+      "Bash(mysql ai_news_hub -e \"SELECT id, title, is_fulltext, content_original FROM articles WHERE id=19\\\\G\")",
+      "Bash(mysql ai_news_hub -e \"SELECT id, title, is_fulltext, LEFT\\(content_original, 500\\) FROM articles WHERE id=19;\")",
+      "Bash(mysql ai_news_hub -e \"SELECT id, title, is_fulltext, fetch_attempts, LENGTH\\(content_original\\) len, url FROM articles WHERE is_fulltext=0 ORDER BY id DESC LIMIT 10;\")",
+      "Bash(mysql ai_news_hub -e \"SELECT id, title, is_fulltext, LENGTH\\(content_original\\) len FROM articles ORDER BY id ASC LIMIT 10;\")",
+      "Bash(mysql ai_news_hub -e \"SELECT id, title, LEFT\\(content_original,300\\) FROM articles WHERE id=5;\")",
+      "Bash(mysql ai_news_hub -e \"SELECT a.id, a.url, a.is_fulltext, LENGTH\\(a.content_original\\) len, s.name, s.type FROM articles a JOIN sources s ON a.source_id=s.id WHERE LENGTH\\(a.content_original\\) < 2000 ORDER BY len ASC LIMIT 10;\")",
+      "Bash(mysql ai_news_hub -e \"SELECT a.id, a.url, s.name FROM articles a JOIN sources s ON a.source_id=s.id WHERE a.id IN \\(1,2,3,4\\);\")",
+      "Bash(.venv/bin/python3 -c ' *)",
+      "Bash(mysql ai_news_hub -e \"SELECT a.id, a.url, LENGTH\\(a.content_original\\) len FROM articles a WHERE LENGTH\\(a.content_original\\) < 5000 ORDER BY len ASC;\")",
+      "Bash(curl -s http://localhost:11434/)",
+      "Bash(ollama list *)",
+      "Bash(curl -s -X POST http://localhost:11434/api/chat -d '{\"model\":\"qwen3.5:9b\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"stream\":false}')",
+      "Bash(ps eww *)",
+      "Bash(pkill -f \"Ollama.app\")",
+      "Bash(open /Applications/Ollama.app)",
+      "Bash(curl -s http://localhost:11434/api/tags)",
+      "Bash(python3 -c \"import sys,json; [print\\(m['name']\\) for m in json.load\\(sys.stdin\\)['models']]\")",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s -X POST http://localhost:11434/api/generate -d '{\"model\":\"qwen3.5:9b\",\"prompt\":\"test\",\"stream\":false}')",
+      "Bash(kill 44028 44018)",
+      "Bash(orb run *)",
+      "Bash(.venv/bin/python3 -c \"from app.translator import translate_article; from app.scheduler import cleanup_old_pdfs; print\\('import OK'\\)\")",
+      "Bash(mysql ai_news_hub -e \"SELECT id, title, status, translate_backend, is_fulltext, CHAR_LENGTH\\(content\\) as content_len, CHAR_LENGTH\\(translated_content\\) as translated_len FROM articles WHERE id = 1\\\\G\")",
+      "Bash(mysql ai_news_hub -e \"SELECT id, media_type, url, local_path, variant, attribution FROM article_media WHERE article_id = 1;\")",
+      "Bash(TRANSLATE_BACKEND=claude .venv/bin/python -c ' *)",
+      "Bash(TRANSLATE_BACKEND=notebooklm .venv/bin/python -c ' *)",
+      "Bash(grep -q \"NOTEBOOKLM_NOTEBOOK_ID\" ~/.ai_news_hub/credentials && echo \"已存在\" || echo \"NOTEBOOKLM_NOTEBOOK_ID=4672f41b-9cdd-4c67-91d1-fec4c1c8565e\" >> ~/.ai_news_hub/credentials && echo \"已寫入\")",
+      "Bash(chmod 600 ~/.ai_news_hub/credentials)",
+      "mcp__plugin_chrome-devtools-mcp_chrome-devtools__new_page",
+      "Bash(curl -s http://127.0.0.1:5001/article/1)",
+      "Bash(pkill -f \"python run.py\")",
+      "Bash(TRANSLATE_BACKEND=notebooklm .venv/bin/python run.py)",
+      "Bash(xargs kill -9)"
+    ],
+    "additionalDirectories": [
+      "/Users/ryanyu/.ai_news_hub"
+    ]
+  }
+}

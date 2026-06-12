@@ -13,7 +13,7 @@
 | 1.2 全文優先，3 次失敗改用摘要 | `fetch_fulltext()` 重試 3 次，`is_fulltext` / `fetch_attempts` 記錄 |
 | 1.3 預設來源 | arXiv cs.AI（官方 API）、Nature Machine Intelligence、JAIR、Artificial Intelligence Review（Springer），均以 RSS/API 蒐集 |
 | 1.4 PDF 轉 md/txt、去重、標註來源 | pypdf 轉文字；`url_hash`（SHA-256）唯一索引去重；`attribution` 欄位 |
-| 1.5 / 1.6 繁中轉譯、可發布內容 | `app/translator.py`：預設以本機 Ollama（`qwen3.5:9b`）翻譯整理為可直接發布的貼文，長文自動切塊；設定 `TRANSLATE_BACKEND=claude` 可改用 Claude API；設定 `TRANSLATE_BACKEND=notebooklm` 可直接上傳 PDF 至 NotebookLM（Gemini 直讀，無 PDF 時自動降回 ollama） |
+| 1.5 / 1.6 繁中轉譯、可發布內容 | `app/translator.py`：一律使用 NotebookLM（需設定 `NOTEBOOKLM_NOTEBOOK_ID` + `nlm` CLI）。有 PDF 時 Gemini 直讀檔案；無 PDF 則自動產生暫存 TXT 檔上傳翻譯。已停用 Ollama 與 Claude 後端。 |
 | 1.7 圖片/影音標註來源 | `article_media` 表含 `attribution` |
 | 1.8 分頁列表、編輯、預覽、上下架、排程自動發布 | Flask 後台 + APScheduler |
 | 2.1 / 2.2 FB / IG / Threads / YouTube + 自訂平台 | `app/publishers.py`（官方 API；自訂平台走 Webhook） |
@@ -38,7 +38,7 @@ mkdir -p ~/.ai_news_hub
 cp credentials.example ~/.ai_news_hub/credentials
 chmod 600 ~/.ai_news_hub/credentials
 
-# 4. 啟動後台（含排程器：預設每 2 小時蒐集、每 30 分鐘翻譯一篇、每分鐘檢查發布排程）
+# 4. 啟動後台（含排程器：預設每 2 小時整點蒐集、每 30 分鐘翻譯一篇、每分鐘檢查發布排程，均改為 Cron 設定）
 .venv/bin/python run.py
 # → http://127.0.0.1:5000
 ```
@@ -47,20 +47,16 @@ chmod 600 ~/.ai_news_hub/credentials
 
 ```bash
 .venv/bin/python collect.py --limit 10            # 手動蒐集
-.venv/bin/python collect.py --translate           # 蒐集後翻譯（預設 Ollama）
-TRANSLATE_BACKEND=claude .venv/bin/python collect.py --translate       # 改用 Claude API
-TRANSLATE_BACKEND=notebooklm .venv/bin/python collect.py --translate   # 改用 NotebookLM（需設定 NOTEBOOKLM_NOTEBOOK_ID）
-COLLECT_INTERVAL_MINUTES=60 .venv/bin/python run.py      # 調整蒐集間隔
-TRANSLATE_INTERVAL_MINUTES=15 .venv/bin/python run.py   # 調整翻譯間隔（預設 30 分鐘）
+.venv/bin/python collect.py --translate           # 蒐集後進行翻譯（使用 NotebookLM）
+COLLECT_CRON="0 * * * *" .venv/bin/python run.py      # 調整蒐集排程（例如改為每整點蒐集一次）
+TRANSLATE_CRON="*/15 * * * *" .venv/bin/python run.py   # 調整翻譯排程（例如改為每 15 分鐘翻譯一篇）
 ```
 
 ## 使用流程
 
 1. **蒐集**：排程自動執行，或後台點「立即蒐集＋翻譯」。新文章狀態為「待翻譯」。
-2. **翻譯**：自動翻譯為繁中貼文（狀態→「已翻譯」），也可在文章頁手動重翻。三種後端：
-   - `ollama`（預設）：本機 `qwen3.5:9b`，無需 API key
-   - `claude`：需 `ANTHROPIC_API_KEY`，翻譯品質最高
-   - `notebooklm`：需 `NOTEBOOKLM_NOTEBOOK_ID`（NotebookLM notebook UUID）+ `nlm` CLI；有 PDF 時 Gemini 直讀原文，無 PDF 自動降回 ollama
+2. **翻譯**：自動翻譯為繁中貼文（狀態→「已翻譯」），也可在文章頁手動重翻：
+   - 僅支援 **notebooklm** 翻譯：需 `NOTEBOOKLM_NOTEBOOK_ID`（NotebookLM notebook UUID）+ `nlm` CLI。有 PDF 時直讀 PDF 原文，無 PDF 則自動產生暫存 TXT 檔上傳翻譯，翻譯完成後自動刪除暫存檔與 NotebookLM source。已停用 Ollama 與 Claude 後端。
 3. **編輯／預覽**：文章頁左側編輯 Markdown、右側即時預覽，確認後將狀態設為「**上架**」。
 4. **排程發布**：選擇平台（可複選）與時間建立排程；時間一到由排程器自動發布，結果（貼文連結／失敗原因）記錄在排程列表。
 
@@ -77,9 +73,9 @@ ai_news_hub/
     ├── config.py           # 設定與隱藏檔憑證載入
     ├── db.py               # SQLAlchemy 模型（經 ~/.my.cnf 連線）
     ├── collectors.py       # RSS / arXiv API / HTML 蒐集、PDF→md、去重
-    ├── translator.py       # 繁中翻譯（Ollama 預設 / Claude / NotebookLM 可選；NotebookLM 直讀 PDF，翻譯後自動刪除本機 PDF）
+    ├── translator.py       # 繁中翻譯（一律使用 NotebookLM 直讀 PDF 或原文 TXT 暫存檔，翻譯後自動刪除本機與 NotebookLM 暫存資源）
     ├── publishers.py       # FB / IG / Threads / YouTube / 自訂 Webhook
-    ├── scheduler.py        # APScheduler：定時蒐集（每 2 小時）、每 30 分鐘翻譯一篇、到時發布
+    ├── scheduler.py        # APScheduler：定時任務排程器（改為 Cron 設定方式）
     ├── web.py              # Flask 後台
     └── templates/          # 後台頁面
 ```

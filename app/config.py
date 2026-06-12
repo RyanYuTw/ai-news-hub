@@ -46,18 +46,12 @@ def ensure_dirs() -> None:
 load_credentials()
 ensure_dirs()
 
-# 蒐集間隔（分鐘）、翻譯間隔（分鐘）與發布檢查間隔（秒）
-COLLECT_INTERVAL_MINUTES = int(os.environ.get("COLLECT_INTERVAL_MINUTES", "120"))
-TRANSLATE_INTERVAL_MINUTES = int(os.environ.get("TRANSLATE_INTERVAL_MINUTES", "30"))
-PUBLISH_CHECK_SECONDS = int(os.environ.get("PUBLISH_CHECK_SECONDS", "60"))
+# 蒐集排程、翻譯排程與發布檢查排程的 Cron 設定
+COLLECT_CRON = os.environ.get("COLLECT_CRON", "0 */2 * * *")
+TRANSLATE_CRON = os.environ.get("TRANSLATE_CRON", "*/30 * * * *")
+PUBLISH_CRON = os.environ.get("PUBLISH_CRON", "* * * * *")
 
-# 翻譯後端：ollama、claude 或 notebooklm
-TRANSLATE_BACKEND = os.environ.get("TRANSLATE_BACKEND", "ollama")
-# ollama 設定
-TRANSLATE_MODEL = os.environ.get("TRANSLATE_MODEL", "qwen3.5:9b")
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-# claude 設定（TRANSLATE_BACKEND=claude 時使用）
-CLAUDE_TRANSLATE_MODEL = os.environ.get("CLAUDE_TRANSLATE_MODEL", "claude-opus-4-8")
-# notebooklm 設定（TRANSLATE_BACKEND=notebooklm 時使用）
+# notebooklm 設定
 # 需預先建立一個 NotebookLM notebook 並將 UUID 填入此變數
 NOTEBOOKLM_NOTEBOOK_ID = os.environ.get("NOTEBOOKLM_NOTEBOOK_ID", "")
+

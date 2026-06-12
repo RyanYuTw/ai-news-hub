@@ -1,4 +1,4 @@
-"""排程器：定時蒐集 + 到時自動發布（需求 1.8）。"""
+"""排程器：定時蒐集 + 到時自動發布"""
 from __future__ import annotations
 
 import datetime as dt
@@ -6,9 +6,10 @@ import logging
 from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 
-from .config import COLLECT_INTERVAL_MINUTES, PUBLISH_CHECK_SECONDS, TRANSLATE_INTERVAL_MINUTES
-from .db import ArticleMedia, PublishJob, Session
+from app.config import COLLECT_CRON, PUBLISH_CRON, TRANSLATE_CRON
+from app.db import ArticleMedia, PublishJob, Session
 
 log = logging.getLogger("scheduler")
 
@@ -127,24 +128,21 @@ def start_scheduler() -> BackgroundScheduler:
     scheduler = BackgroundScheduler(timezone="Asia/Taipei")
     scheduler.add_job(
         run_collect,
-        "interval",
-        minutes=COLLECT_INTERVAL_MINUTES,
+        CronTrigger.from_crontab(COLLECT_CRON),
         id="collect",
         max_instances=1,
         coalesce=True,
     )
     scheduler.add_job(
         run_translate_one,
-        "interval",
-        minutes=TRANSLATE_INTERVAL_MINUTES,
+        CronTrigger.from_crontab(TRANSLATE_CRON),
         id="translate",
         max_instances=1,
         coalesce=True,
     )
     scheduler.add_job(
         run_due_publish_jobs,
-        "interval",
-        seconds=PUBLISH_CHECK_SECONDS,
+        CronTrigger.from_crontab(PUBLISH_CRON),
         id="publish",
         max_instances=1,
         coalesce=True,
@@ -159,7 +157,7 @@ def start_scheduler() -> BackgroundScheduler:
     )
     scheduler.start()
     log.info(
-        "排程器啟動：每 %s 分鐘蒐集、每 %s 分鐘翻譯一篇、每 %s 秒檢查發布",
-        COLLECT_INTERVAL_MINUTES, TRANSLATE_INTERVAL_MINUTES, PUBLISH_CHECK_SECONDS,
+        "排程器啟動：蒐集排程 (%s)、翻譯排程 (%s)、發布檢查排程 (%s)",
+        COLLECT_CRON, TRANSLATE_CRON, PUBLISH_CRON,
     )
     return scheduler
