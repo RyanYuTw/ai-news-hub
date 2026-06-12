@@ -1,0 +1,319 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  main { max-width:1400px !important; }
+  .split { display:grid; grid-template-columns:1fr 1fr; gap:1rem; align-items:start; }
+  @media (max-width:900px){ .split{ grid-template-columns:1fr; } }
+  .side { background:#fff; border:1px solid var(--line); border-radius:10px; padding:1.1rem; }
+  .mode-bar { display:flex; border:1px solid var(--line); border-radius:7px; overflow:hidden; margin-bottom:.85rem; }
+  .mode-btn { flex:1; padding:.38rem 0; background:#fff; border:none; cursor:pointer; font-size:.84rem; color:#64748b; font-weight:600; transition:background .15s,color .15s; }
+  .mode-btn.on { background:var(--accent); color:#fff; }
+  .preview-pane { border:1px dashed var(--line); border-radius:8px; padding:1rem 1.1rem; background:#fcfcfd;
+                  overflow-wrap:anywhere; min-height:380px; max-height:72vh; overflow-y:auto; font-size:.92rem; line-height:1.75; }
+  .img-grid { display:grid; grid-template-columns:1fr 1fr; gap:.65rem; margin-top:.75rem; }
+  .img-label { font-size:.75rem; color:#64748b; text-align:center; margin:.3rem 0 0; }
+  .copy-chip { background:none; border:1px solid var(--line); border-radius:5px;
+               padding:.1rem .42rem; font-size:.75rem; color:#64748b; cursor:pointer; transition:background .12s; }
+  .copy-chip:hover { background:#f1f5f9; }
+</style>
+
+{# ── 文章資訊列 ── #}
+<div class="card" style="margin-bottom:1rem;">
+  <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:1rem; flex-wrap:wrap;">
+    <div style="flex:1; min-width:0;">
+      <p class="muted" style="margin:0 0 .25rem;">{{ a.source.name if a.source else '—' }} ｜ {{ a.created_at.strftime('%Y-%m-%d') }} ｜ {{ '全文' if a.is_fulltext else '摘要' }}</p>
+      <h2 style="margin:0 0 .25rem; font-size:1.1rem; line-height:1.45; color:#0f172a;">{{ a.title }}</h2>
+      {% if a.title_zh %}
+      <div style="display:flex; align-items:center; gap:.45rem;">
+        <span id="title-zh-text" style="font-weight:600; color:#1e293b; font-size:1rem;">{{ a.title_zh }}</span>
+        <button type="button" class="copy-chip" data-src="title-zh-text">複製</button>
+      </div>
+      {% endif %}
+      {% if a.authors %}<p class="muted" style="margin:.25rem 0 0;">{{ a.authors[:200] }}</p>{% endif %}
+    </div>
+    <div style="display:flex; flex-direction:column; gap:.4rem; align-items:flex-end; flex-shrink:0;">
+      <span class="badge {{ a.status }}" style="font-size:.85rem;">{{ STATUS_LABELS[a.status] }}</span>
+      {% set pdf_media = a.media | selectattr('media_type', 'equalto', 'pdf') | list %}
+      {% if pdf_media %}
+        <a class="button ghost" href="{{ pdf_media[0].url }}" target="_blank" rel="noopener"
+           style="font-size:.82rem; padding:.3rem .7rem;">原文 PDF</a>
+      {% else %}
+        <a class="button ghost" href="{{ a.url }}" target="_blank" rel="noopener"
+           style="font-size:.82rem; padding:.3rem .7rem;">原始網頁</a>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{# ── 左右分割 ── #}
+<div class="split">
+
+  {# ── 左：編輯器 ── #}
+  <div class="side">
+    <div class="mode-bar">
+      <button type="button" class="mode-btn on" data-mode="social">社群貼文</button>
+      <button type="button" class="mode-btn" data-mode="research">學術筆記</button>
+    </div>
+
+    <form id="edit-form" method="post" action="{{ url_for('article_detail', article_id=a.id) }}">
+
+      {# 中文標題 #}
+      <div style="display:flex; align-items:center; gap:.5rem; margin-bottom:.7rem;">
+        <input type="text" name="title_zh" id="input-title-zh"
+               value="{{ a.title_zh or '' }}"
+               placeholder="中文標題"
+               style="flex:1; font-weight:600; font-size:.95rem;">
+        <button type="button" class="copy-chip" data-input="input-title-zh">複製</button>
+      </div>
+
+      {# 社群貼文 textarea #}
+      <div id="editor-social">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:.2rem;">
+          <label style="margin:0; font-size:.8rem; color:#94a3b8;">Markdown</label>
+          <button type="button" class="copy-chip" data-input="content_zh">複製</button>
+        </div>
+        <textarea name="content_zh" id="content_zh"
+                  style="min-height:420px; resize:vertical;">{{ a.content_zh or '' }}</textarea>
+      </div>
+
+      {# 學術筆記 textarea #}
+      <div id="editor-research" style="display:none;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:.2rem;">
+          <label style="margin:0; font-size:.8rem; color:#94a3b8;">Markdown</label>
+          <button type="button" class="copy-chip" data-input="content_research">複製</button>
+        </div>
+        <textarea name="content_research" id="content_research"
+                  style="min-height:560px; resize:vertical;">{{ a.content_research or '' }}</textarea>
+      </div>
+
+      {# 操作列 #}
+      <div style="display:flex; align-items:center; gap:.6rem; margin-top:.85rem; flex-wrap:wrap;
+                  padding-top:.8rem; border-top:1px solid var(--line);">
+        <select name="status" style="width:auto; min-width:110px;">
+          {% for key, label in STATUS_LABELS.items() %}
+            <option value="{{ key }}" {% if a.status == key %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <button type="submit">儲存</button>
+        <form class="inline" method="post" action="{{ url_for('article_translate', article_id=a.id) }}">
+          <button class="ghost" type="submit">重新翻譯</button>
+        </form>
+        <form class="inline" method="post" action="{{ url_for('article_delete', article_id=a.id) }}"
+              onsubmit="return confirm('確定刪除這篇文章？');">
+          <button class="danger" type="submit">刪除</button>
+        </form>
+      </div>
+    </form>
+  </div>
+
+  {# ── 右：預覽 + 圖片 ── #}
+  <div style="display:flex; flex-direction:column; gap:1rem; position:sticky; top:1rem;">
+
+    {# 預覽 #}
+    <div class="side">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:.6rem;">
+        <span style="font-size:.8rem; font-weight:600; color:#94a3b8;" id="preview-label">社群貼文 — 預覽</span>
+        <button type="button" class="copy-chip" id="copy-preview-btn">複製純文字</button>
+      </div>
+      <div id="preview-pane" class="preview-pane">{{ a.content_zh | mdrender | safe }}</div>
+    </div>
+
+  </div>{# /右欄 #}
+</div>{# /split #}
+
+{# ── 排程發布 ── #}
+<details class="card" style="padding:.8rem 1.2rem; margin-top:1rem;">
+  <summary style="cursor:pointer; font-weight:600; color:#334155; user-select:none;">排程發布</summary>
+  <div style="margin-top:.8rem;">
+    <form method="post" action="{{ url_for('article_schedule', article_id=a.id) }}">
+      <label>發布平台（可複選）</label>
+      {% for p in platforms %}
+        <label style="display:inline-flex; gap:.3rem; margin-right:1rem;">
+          <input type="checkbox" name="platform_ids" value="{{ p.id }}"> {{ p.name }}（{{ p.type }}）
+        </label>
+      {% else %}
+        <p class="muted">尚無啟用的平台，請至「發布平台」頁設定。</p>
+      {% endfor %}
+      <label>發布時間</label>
+      <input type="datetime-local" name="scheduled_at" style="max-width:280px">
+      <div style="margin-top:.6rem;">
+        <button type="submit">建立排程</button>
+        <span class="muted">（需為「上架」狀態）</span>
+      </div>
+    </form>
+    {% if jobs %}
+    <table style="margin-top:1rem;">
+      <tr><th>平台</th><th>排定時間</th><th>狀態</th><th>結果</th><th></th></tr>
+      {% for j in jobs %}
+      <tr>
+        <td>{{ j.platform.name }}</td>
+        <td>{{ j.scheduled_at.strftime('%Y-%m-%d %H:%M') }}</td>
+        <td><span class="badge {{ j.status }}">{{ j.status }}</span></td>
+        <td class="muted">
+          {% if j.posted_url %}<a href="{{ j.posted_url }}" target="_blank" rel="noopener">貼文連結</a>{% endif %}
+          {{ j.result_message or '' }}
+        </td>
+        <td>
+          {% if j.status == 'pending' %}
+          <form class="inline" method="post" action="{{ url_for('job_cancel', job_id=j.id) }}">
+            <button class="ghost" type="submit">取消</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% endif %}
+  </div>
+</details>
+
+{# ── 媒體素材 ── #}
+{% set variant_imgs = a.media | selectattr('media_type', 'equalto', 'image') | selectattr('variant') | list %}
+<details class="card" style="padding:.8rem 1.2rem;">
+  <summary style="cursor:pointer; font-weight:600; color:#334155; user-select:none;">
+    媒體素材（{{ a.media | length }}）
+  </summary>
+
+  {# 圖片尺寸選擇器 #}
+  {% if variant_imgs %}
+  <div style="margin-top:.9rem;">
+    <div style="display:flex; align-items:center; gap:.5rem; flex-wrap:wrap; margin-bottom:.65rem;">
+      <span class="muted" style="font-size:.82rem;">標準圖片：</span>
+      {% for m in variant_imgs %}
+      <button type="button" class="img-size-btn copy-chip"
+              data-img-src="{{ m.url }}" data-label="{{ m.variant }}"
+              style="font-size:.8rem; padding:.22rem .65rem;">{{ m.variant }}</button>
+      {% endfor %}
+      <form class="inline" method="post" action="{{ url_for('article_generate_images', article_id=a.id) }}"
+            style="margin-left:auto;">
+        <button class="ghost" type="submit" style="font-size:.78rem; padding:.2rem .55rem;">重新生成</button>
+      </form>
+    </div>
+    <div id="img-preview-area" style="display:none; margin-bottom:.8rem;">
+      <a id="img-preview-link" href="#" target="_blank" rel="noopener">
+        <img id="img-preview-el" src="" alt=""
+             style="max-width:100%; max-height:480px; border-radius:7px;
+                    border:1px solid var(--line); display:block; margin:0 auto;">
+      </a>
+      <p id="img-preview-label" class="img-label" style="margin-top:.35rem;"></p>
+    </div>
+  </div>
+  {% else %}
+  <div style="margin-top:.8rem;">
+    <form method="post" action="{{ url_for('article_generate_images', article_id=a.id) }}">
+      <button class="ghost" type="submit" style="font-size:.85rem;">生成標準圖片</button>
+    </form>
+  </div>
+  {% endif %}
+
+  {# 媒體清單 #}
+  {% if a.media %}
+  <table style="margin-top:.5rem; font-size:.85rem;">
+    <tr><th>類型</th><th>規格</th><th>網址／路徑</th><th>來源標註</th></tr>
+    {% for m in a.media %}
+    <tr>
+      <td>{{ m.media_type }}</td>
+      <td class="muted">{{ m.variant or '—' }}</td>
+      <td>
+        {% if m.url.startswith('http') or m.url.startswith('/media/') %}
+          <a href="{{ m.url }}" target="_blank" rel="noopener">{{ m.url[:70] }}</a>
+        {% else %}
+          <span class="muted">{{ m.url[:70] }}</span>
+        {% endif %}
+      </td>
+      <td class="muted">{{ m.attribution }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted" style="margin-top:.8rem;">尚無媒體素材。</p>
+  {% endif %}
+</details>
+
+<script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
+        integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+"
+        crossorigin="anonymous"></script>
+<script>
+const socialTA    = document.getElementById('content_zh');
+const researchTA  = document.getElementById('content_research');
+const previewPane = document.getElementById('preview-pane');
+const previewLabel= document.getElementById('preview-label');
+let   currentMode = 'social';
+
+function renderPreview() {
+  const src = currentMode === 'social' ? socialTA : researchTA;
+  previewPane.innerHTML = marked.parse(src.value);
+}
+
+// 模式切換
+document.querySelectorAll('.mode-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    currentMode = btn.dataset.mode;
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('on', b === btn));
+    document.getElementById('editor-social').style.display    = currentMode === 'social'   ? '' : 'none';
+    document.getElementById('editor-research').style.display  = currentMode === 'research' ? '' : 'none';
+    previewLabel.textContent = currentMode === 'social' ? '社群貼文 — 預覽' : '學術筆記 — 預覽';
+    renderPreview();
+  });
+});
+
+// 即時預覽
+socialTA.addEventListener('input', () => { if (currentMode === 'social')   renderPreview(); });
+researchTA.addEventListener('input', () => { if (currentMode === 'research') renderPreview(); });
+
+// 複製：textarea / input
+document.querySelectorAll('.copy-chip[data-input]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const el = document.getElementById(btn.dataset.input);
+    navigator.clipboard.writeText(el.value).then(() => {
+      const orig = btn.textContent;
+      btn.textContent = '已複製！';
+      setTimeout(() => btn.textContent = orig, 1400);
+    });
+  });
+});
+
+// 複製：純文字元素
+document.querySelectorAll('.copy-chip[data-src]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const el = document.getElementById(btn.dataset.src);
+    navigator.clipboard.writeText(el.textContent).then(() => {
+      const orig = btn.textContent;
+      btn.textContent = '已複製！';
+      setTimeout(() => btn.textContent = orig, 1400);
+    });
+  });
+});
+
+// 圖片尺寸按鈕：懶載入
+const imgArea    = document.getElementById('img-preview-area');
+const imgLink    = document.getElementById('img-preview-link');
+const imgEl      = document.getElementById('img-preview-el');
+const imgLabelEl = document.getElementById('img-preview-label');
+if (imgArea) {
+  document.querySelectorAll('.img-size-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const src   = btn.dataset.imgSrc;
+      const label = btn.dataset.label;
+      imgEl.src              = src;
+      imgLink.href           = src;
+      imgEl.alt              = label;
+      imgLabelEl.textContent = label;
+      imgArea.style.display  = '';
+      document.querySelectorAll('.img-size-btn').forEach(b =>
+        b.style.background = b === btn ? 'var(--accent)' : '');
+      document.querySelectorAll('.img-size-btn').forEach(b =>
+        b.style.color = b === btn ? '#fff' : '');
+    });
+  });
+}
+
+// 複製預覽純文字
+document.getElementById('copy-preview-btn').addEventListener('click', function() {
+  navigator.clipboard.writeText(previewPane.innerText).then(() => {
+    this.textContent = '已複製！';
+    setTimeout(() => this.textContent = '複製純文字', 1400);
+  });
+});
+</script>
+{% endblock %}

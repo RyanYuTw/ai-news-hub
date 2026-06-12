@@ -1,0 +1,17 @@
+flask>=3.0
+pillow>=10.0
+pymupdf>=1.24
+sqlalchemy>=2.0
+pymysql>=1.1
+cryptography>=42.0
+feedparser>=6.0
+requests>=2.31
+beautifulsoup4>=4.12
+lxml>=5.0
+pypdf>=4.0
+anthropic>=0.92
+apscheduler>=3.10
+markdown>=3.5
+google-api-python-client>=2.100
+google-auth>=2.23
+google-auth-oauthlib>=1.1

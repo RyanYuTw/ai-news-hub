@@ -1,0 +1,30 @@
+# 敏感憑證
+credentials
+
+# 資料庫
+*.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# 媒體檔案
+media_files/
+
+# 環境變數
+.env
+.env.*
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+.idea/

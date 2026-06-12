@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2 style="margin-top:0">蒐集來源</h2>
+  <table>
+    <tr><th>#</th><th>名稱</th><th>類型</th><th>網址</th><th>預設</th><th>狀態</th><th>上次蒐集</th><th></th></tr>
+    {% for s in items %}
+    <tr>
+      <td>{{ s.id }}</td>
+      <td>{{ s.name }}</td>
+      <td>{{ s.type }}</td>
+      <td class="muted" style="max-width:360px; overflow-wrap:anywhere;">{{ s.url }}</td>
+      <td>{{ '✓' if s.is_default else '' }}</td>
+      <td><span class="badge {{ 'online' if s.enabled else 'offline' }}">{{ '啟用' if s.enabled else '停用' }}</span></td>
+      <td class="muted">{{ s.last_fetched_at.strftime('%Y-%m-%d %H:%M') if s.last_fetched_at else '—' }}</td>
+      <td style="white-space:nowrap;">
+        <form class="inline" method="post" action="{{ url_for('source_toggle', source_id=s.id) }}">
+          <button class="ghost" type="submit">{{ '停用' if s.enabled else '啟用' }}</button>
+        </form>
+        {% if not s.is_default %}
+        <form class="inline" method="post" action="{{ url_for('source_delete', source_id=s.id) }}"
+              onsubmit="return confirm('確定刪除此來源？');">
+          <button class="danger" type="submit">刪除</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">新增自訂來源</h3>
+  <form method="post" action="{{ url_for('sources') }}">
+    <div class="grid2">
+      <div>
+        <label>名稱</label>
+        <input type="text" name="name" required>
+      </div>
+      <div>
+        <label>類型</label>
+        <select name="type">
+          <option value="rss">RSS（有 RSS 優先使用）</option>
+          <option value="html">HTML（無 RSS，解析網頁）</option>
+          <option value="arxiv_api">arXiv API</option>
+        </select>
+      </div>
+    </div>
+    <label>網址</label>
+    <input type="url" name="url" required placeholder="https://...">
+    <div style="margin-top:.8rem;"><button type="submit">新增</button></div>
+  </form>
+</div>
+{% endblock %}
