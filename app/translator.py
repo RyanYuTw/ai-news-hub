@@ -51,8 +51,21 @@ _NLM_RESEARCH_PROMPT = (
 )
 
 
+_NLM_TIMEOUT = 180  # 秒，source add --wait 或 query 的最長等待時間
+
 def _nlm_run(*args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["nlm", *args], capture_output=True, text=True, check=True)
+    try:
+        return subprocess.run(
+            ["nlm", *args], capture_output=True, text=True, check=True,
+            timeout=_NLM_TIMEOUT,
+        )
+    except subprocess.TimeoutExpired as exc:
+        log.error("nlm 指令逾時（%ss）：nlm %s", _NLM_TIMEOUT, " ".join(args[:3]))
+        raise RuntimeError(f"nlm 指令逾時 {_NLM_TIMEOUT}s") from exc
+    except subprocess.CalledProcessError as exc:
+        log.error("nlm 指令失敗（exit %s）\nstderr: %s\nstdout: %s",
+                  exc.returncode, exc.stderr.strip(), exc.stdout.strip())
+        raise
 
 
 def _nlm_translate_file(source: str) -> tuple[str, str, str]:
@@ -70,16 +83,37 @@ def _nlm_translate_file(source: str) -> tuple[str, str, str]:
     if not m:
         raise RuntimeError(f"無法從 nlm 輸出解析 source ID：{result.stdout}")
     source_id = m.group(1)
-    log.info("NotebookLM source 上傳完成：%s", source_id)
+    log.info("NotebookLM source 上傳完成：%s，等待 index…", source_id)
+    import time as _time
+    _time.sleep(10)
+
+    import time as _time
 
     def _query(prompt: str) -> str:
-        raw = json.loads(
-            _nlm_run(
-                "notebook", "query", NOTEBOOKLM_NOTEBOOK_ID,
-                prompt, "--source-ids", source_id, "--json",
-            ).stdout
-        )["answer"].strip()
-        return re.sub(r"\s*\[\d+(?:,\s*\d+)*\]", "", raw).strip()
+        last_exc: Exception | None = None
+        for attempt in range(1, 4):
+            try:
+                result = _nlm_run(
+                    "notebook", "query", NOTEBOOKLM_NOTEBOOK_ID,
+                    prompt, "--source-ids", source_id, "--json",
+                )
+                data = json.loads(result.stdout)
+                if data.get("status") == "error":
+                    err_msg = data.get("error", "未知錯誤")
+                    # RESOURCE_EXHAUSTED 繼續重試無意義，直接中止
+                    if "RESOURCE_EXHAUSTED" in err_msg:
+                        raise RuntimeError(f"NotebookLM API 額度耗盡：{err_msg}")
+                    raise RuntimeError(f"NotebookLM 回傳錯誤：{err_msg}")
+                raw = data["answer"].strip()
+                return re.sub(r"\s*\[\d+(?:,\s*\d+)*\]", "", raw).strip()
+            except RuntimeError:
+                raise
+            except Exception as exc:
+                last_exc = exc
+                wait = 15 * attempt
+                log.warning("NotebookLM query 第 %s 次失敗，%s 秒後重試：%s", attempt, wait, exc)
+                _time.sleep(wait)
+        raise RuntimeError("NotebookLM query 三次均失敗") from last_exc
 
     try:
         title_raw = _query(_NLM_TITLE_PROMPT)

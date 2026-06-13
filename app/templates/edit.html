@@ -95,15 +95,17 @@
           {% endfor %}
         </select>
         <button type="submit">儲存</button>
-        <form class="inline" method="post" action="{{ url_for('article_translate', article_id=a.id) }}">
-          <button class="ghost" type="submit">重新翻譯</button>
-        </form>
-        <form class="inline" method="post" action="{{ url_for('article_delete', article_id=a.id) }}"
-              onsubmit="return confirm('確定刪除這篇文章？');">
-          <button class="danger" type="submit">刪除</button>
-        </form>
+        <button class="ghost" type="submit" form="form-translate">重新翻譯</button>
+        <button class="danger" type="submit" form="form-delete"
+                onclick="return confirm('確定刪除這篇文章？');">刪除</button>
       </div>
     </form>
+
+    {# 獨立表單：移出 edit-form 避免巢狀 form 問題 #}
+    <form id="form-translate" method="post"
+          action="{{ url_for('article_translate', article_id=a.id) }}" style="display:none;"></form>
+    <form id="form-delete" method="post"
+          action="{{ url_for('article_delete', article_id=a.id) }}" style="display:none;"></form>
   </div>
 
   {# ── 右：預覽 + 圖片 ── #}
