@@ -46,10 +46,13 @@ def ensure_dirs() -> None:
 load_credentials()
 ensure_dirs()
 
-# 蒐集排程、翻譯排程與發布檢查排程的 Cron 設定
+# Google Drive 資料夾 ID（ai_news_hub/pdf 與 ai_news_hub/images 子資料夾）
+GDRIVE_TXT_FOLDER_ID = os.environ.get("GDRIVE_TXT_FOLDER_ID", "")
+GDRIVE_IMAGES_FOLDER_ID = os.environ.get("GDRIVE_IMAGES_FOLDER_ID", "")
+
+# 蒐集排程與翻譯排程的 Cron 設定
 COLLECT_CRON = os.environ.get("COLLECT_CRON", "0 */2 * * *")
-TRANSLATE_CRON = os.environ.get("TRANSLATE_CRON", "*/30 * * * *")
-PUBLISH_CRON = os.environ.get("PUBLISH_CRON", "* * * * *")
+TRANSLATE_CRON = os.environ.get("TRANSLATE_CRON", "*/10 * * * *")
 
 # notebooklm 設定
 # 需預先建立一個 NotebookLM notebook 並將 UUID 填入此變數

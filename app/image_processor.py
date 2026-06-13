@@ -9,8 +9,8 @@
   1. 文章既有的 HTTP 圖片（原始圖片，非 variant 生成圖）
   2. PDF 第一頁截圖
 
-生成的圖片以 JPEG 儲存於 media_files/，local_path 記錄絕對路徑，
-url 為 /media/<filename>（供管理介面預覽），variant 欄位記錄尺寸規格。
+生成的圖片上傳至 Google Drive（gdrive.py），url 儲存公開連結。
+若 Drive 未設定（缺少 service account），退回本機 media_files/ 備援。
 """
 from __future__ import annotations
 
@@ -21,8 +21,9 @@ from pathlib import Path
 import requests
 from PIL import Image, ImageDraw, ImageFont
 
-from .config import MEDIA_DIR
+from .config import GDRIVE_IMAGES_FOLDER_ID, MEDIA_DIR
 from .db import Article, ArticleMedia, Session
+from . import gdrive
 
 log = logging.getLogger("image_processor")
 
@@ -115,10 +116,13 @@ def _center_crop_resize(img: Image.Image, target_w: int, target_h: int) -> Image
     return img.resize((target_w, target_h), Image.LANCZOS)
 
 
-def _pdf_first_page(pdf_path: str) -> Image.Image:
+def _pdf_first_page(source: str | bytes) -> Image.Image:
     import fitz  # pymupdf
 
-    doc = fitz.open(pdf_path)
+    if isinstance(source, bytes):
+        doc = fitz.open(stream=source, filetype="pdf")
+    else:
+        doc = fitz.open(source)
     page = doc[0]
     pix = page.get_pixmap(matrix=fitz.Matrix(2, 2), colorspace=fitz.csRGB)
     return Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
@@ -153,9 +157,17 @@ def _source_image(article: Article, pdf_path: str | None) -> tuple[Image.Image, 
         )
         _pdf = pdf_media.local_path if pdf_media else None
 
-    if _pdf and Path(_pdf).exists():
+    if _pdf:
         try:
-            img = _pdf_first_page(_pdf)
+            if _pdf.startswith("http"):
+                resp = requests.get(_pdf, timeout=60, headers={"User-Agent": "Mozilla/5.0"})
+                resp.raise_for_status()
+                source: str | bytes = resp.content
+            else:
+                if not Path(_pdf).exists():
+                    return None
+                source = _pdf
+            img = _pdf_first_page(source)
             log.info("從 PDF 截取第一頁：%s", _pdf)
             return img, "PDF 第一頁截圖"
         except Exception as exc:
@@ -177,15 +189,18 @@ def generate_article_images(article_id: int, pdf_path: str | None = None) -> int
             return 0
         source_img, source_attr = result
 
-        title = article.title_zh or article.title
+        title = article.title
 
         # 移除舊的 variant 圖片記錄（重新生成時清理）
         for m in list(article.media):
             if m.media_type == "image" and m.variant:
-                if m.local_path:
+                if m.gdrive_file_id:
+                    gdrive.delete_file(m.gdrive_file_id)
+                elif m.local_path:
                     Path(m.local_path).unlink(missing_ok=True)
                 session.delete(m)
 
+        use_drive = gdrive.is_available()
         count = 0
         for variant, (w, h) in VARIANTS.items():
             try:
@@ -193,17 +208,36 @@ def generate_article_images(article_id: int, pdf_path: str | None = None) -> int
                 if variant == "1920x1080":
                     img = _add_title_overlay(img, title)
                 filename = f"{article.url_hash}_{variant}.jpg"
-                save_path = MEDIA_DIR / filename
-                img.save(save_path, "JPEG", quality=90, optimize=True)
 
-                session.add(ArticleMedia(
-                    article_id=article_id,
-                    media_type="image",
-                    url=f"/media/{filename}",
-                    local_path=str(save_path),
-                    attribution=source_attr,
-                    variant=variant,
-                ))
+                if use_drive:
+                    buf = io.BytesIO()
+                    img.save(buf, "JPEG", quality=90, optimize=True)
+                    file_id, url = gdrive.upload_bytes(
+                        buf.getvalue(), filename, "image/jpeg",
+                        folder_id=GDRIVE_IMAGES_FOLDER_ID or None,
+                    )
+                    session.add(ArticleMedia(
+                        article_id=article_id,
+                        media_type="image",
+                        url=url,
+                        gdrive_file_id=file_id,
+                        local_path=None,
+                        attribution=source_attr,
+                        variant=variant,
+                    ))
+                else:
+                    save_path = MEDIA_DIR / filename
+                    img.save(save_path, "JPEG", quality=90, optimize=True)
+                    session.add(ArticleMedia(
+                        article_id=article_id,
+                        media_type="image",
+                        url=f"/media/{filename}",
+                        gdrive_file_id=None,
+                        local_path=str(save_path),
+                        attribution=source_attr,
+                        variant=variant,
+                    ))
+
                 count += 1
                 log.info("已生成圖片 %s（%dx%d）", filename, w, h)
             except Exception as exc:

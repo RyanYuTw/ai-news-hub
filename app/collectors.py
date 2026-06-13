@@ -20,7 +20,7 @@ import feedparser
 import requests
 from bs4 import BeautifulSoup
 
-from .config import FULLTEXT_MAX_ATTEMPTS, MEDIA_DIR
+from .config import FULLTEXT_MAX_ATTEMPTS
 from .db import Article, ArticleMedia, Session, SourceSite
 
 log = logging.getLogger("collector")
@@ -133,15 +133,12 @@ def _download_to_viewer_url(url: str) -> str:
     return url
 
 
-def _save_pdf(data: bytes, pdf_url: str, article_url: str) -> dict:
-    """將 PDF bytes 寫入 media_files，回傳 media dict。url 存 viewer 頁面網址。"""
-    filename = url_hash(pdf_url) + ".pdf"
-    path = MEDIA_DIR / filename
-    path.write_bytes(data)
+def _save_pdf(pdf_url: str, article_url: str) -> dict:
+    """回傳 PDF media dict；pdf_url 存入 local_path 供 NotebookLM --url 使用。"""
     return {
         "media_type": "pdf",
         "url": _download_to_viewer_url(pdf_url),
-        "local_path": str(path),
+        "local_path": pdf_url,
         "attribution": f"PDF 來源：{article_url}",
     }
 
@@ -178,7 +175,7 @@ def fetch_fulltext(url: str) -> tuple[str | None, int, list[dict], str | None]:
             resp = _get(url)
             ctype = resp.headers.get("Content-Type", "").lower()
             if "pdf" in ctype or url.lower().endswith(".pdf"):
-                pdf_media = _save_pdf(resp.content, url, url)
+                pdf_media = _save_pdf(url, url)
                 text = pdf_to_markdown(resp.content)
                 return (text or None), attempts, [pdf_media], None
             soup = BeautifulSoup(resp.text, "lxml")
@@ -192,7 +189,7 @@ def fetch_fulltext(url: str) -> tuple[str | None, int, list[dict], str | None]:
                     pdf_resp = _get(pdf_url)
                     pdf_text = pdf_to_markdown(pdf_resp.content)
                     if pdf_text and len(pdf_text) > 400:
-                        media.append(_save_pdf(pdf_resp.content, pdf_url, url))
+                        media.append(_save_pdf(pdf_url, url))
                         return pdf_text, attempts, media, authors
                 except Exception as pdf_exc:  # noqa: BLE001
                     log.debug("PDF 下載失敗，退回 HTML：%s", pdf_exc)

@@ -2,17 +2,17 @@
 """
 from __future__ import annotations
 
-import datetime as dt
 import logging
 import threading
 
 import markdown as md
+import nh3
 from flask import Flask, abort, flash, redirect, render_template, request, send_from_directory, url_for
 from sqlalchemy import func, or_
 from sqlalchemy.orm import joinedload
 
 from .config import MEDIA_DIR
-from .db import Article, Platform, PublishJob, Session, SourceSite
+from .db import Article, Session, SourceSite
 
 log = logging.getLogger("web")
 
@@ -27,11 +27,35 @@ STATUS_LABELS = {
 
 def create_app() -> Flask:
     app = Flask(__name__)
-    app.secret_key = "ai-news-hub-local-admin"  # 僅本機後台 flash 訊息用，非對外服務
+    import os, secrets as _secrets
+    _fsk = os.environ.get("FLASK_SECRET_KEY")
+    if not _fsk:
+        log.warning("FLASK_SECRET_KEY 未設定，session 將於每次重啟後失效；請在 ~/.ai_news_hub/credentials 填入固定金鑰")
+        _fsk = _secrets.token_hex(32)
+    app.secret_key = _fsk
+
+    _ALLOWED_TAGS = {
+        "p","b","i","strong","em","ul","ol","li","code","pre",
+        "h1","h2","h3","h4","blockquote","a","br","hr","table",
+        "thead","tbody","tr","th","td","del","s",
+    }
+    _ALLOWED_ATTRS: dict[str, set[str]] = {"a": {"href", "title"}}
 
     @app.template_filter("mdrender")
     def mdrender(text: str | None) -> str:
-        return md.markdown(text or "", extensions=["extra", "nl2br"])
+        raw = md.markdown(text or "", extensions=["extra", "nl2br"])
+        return nh3.clean(raw, tags=_ALLOWED_TAGS, attributes=_ALLOWED_ATTRS)
+
+    @app.template_filter("safe_url")
+    def safe_url(url: str | None) -> str:
+        from urllib.parse import urlparse
+        if not url:
+            return "#"
+        try:
+            scheme = urlparse(url).scheme.lower()
+        except Exception:
+            return "#"
+        return url if scheme in ("http", "https") else "#"
 
     @app.context_processor
     def inject_globals():
@@ -83,28 +107,45 @@ def create_app() -> Flask:
                 article.content_zh = request.form.get("content_zh", "").strip() or None
                 article.content_research = request.form.get("content_research", "").strip() or None
                 new_status = request.form.get("status", article.status)
+                going_online = (
+                    new_status == "online" and article.status != "online"
+                    and new_status in STATUS_LABELS
+                )
                 if new_status in STATUS_LABELS:
                     article.status = new_status
-                session.commit()
+                if going_online:
+                    from . import gdrive
+                    drive_ids = [
+                        m.gdrive_file_id for m in article.media
+                        if m.media_type == "image" and m.gdrive_file_id
+                    ]
+                    for m in article.media:
+                        if m.media_type == "image" and m.gdrive_file_id:
+                            m.gdrive_file_id = None
+                    session.commit()
+                    for fid in drive_ids:
+                        gdrive.delete_file(fid)
+                else:
+                    session.commit()
                 flash("已儲存")
                 return redirect(url_for("article_detail", article_id=article_id))
-            platforms = session.query(Platform).filter_by(enabled=True).all()
-            jobs = (
-                session.query(PublishJob)
-                .filter_by(article_id=article_id)
-                .order_by(PublishJob.scheduled_at.desc())
-                .all()
-            )
-            _ = article.media, [j.platform for j in jobs]  # 預先載入關聯
-        return render_template("edit.html", a=article, platforms=platforms, jobs=jobs)
+            _ = article.media  # 預先載入關聯
+        return render_template("edit.html", a=article)
 
     @app.route("/article/<int:article_id>/delete", methods=["POST"])
     def article_delete(article_id: int):
+        from . import gdrive
+        from .db import ArticleMedia
         with Session() as session:
             article = session.get(Article, article_id)
             if article:
+                drive_ids = [
+                    m.gdrive_file_id for m in article.media if m.gdrive_file_id
+                ]
                 session.delete(article)
                 session.commit()
+                for fid in drive_ids:
+                    gdrive.delete_file(fid)
                 flash("文章已刪除")
         return redirect(url_for("index"))
 
@@ -118,47 +159,6 @@ def create_app() -> Flask:
         threading.Thread(target=worker, daemon=True).start()
         flash("翻譯已在背景執行，稍後重新整理查看結果")
         return redirect(url_for("article_detail", article_id=article_id))
-
-    # ------------------------------------------------------------- 發布排程
-    @app.route("/article/<int:article_id>/schedule", methods=["POST"])
-    def article_schedule(article_id: int):
-        platform_ids = request.form.getlist("platform_ids")
-        when_raw = request.form.get("scheduled_at", "").strip()
-        if not platform_ids or not when_raw:
-            flash("請選擇平台與發布時間")
-            return redirect(url_for("article_detail", article_id=article_id))
-        scheduled_at = dt.datetime.fromisoformat(when_raw)
-        with Session() as session:
-            article = session.get(Article, article_id)
-            if not article:
-                abort(404)
-            if article.status != "online":
-                flash("請先將文章設為「上架」再排程發布")
-                return redirect(url_for("article_detail", article_id=article_id))
-            for pid in platform_ids:
-                session.add(
-                    PublishJob(
-                        article_id=article_id,
-                        platform_id=int(pid),
-                        scheduled_at=scheduled_at,
-                    )
-                )
-            session.commit()
-        flash(f"已排程 {len(platform_ids)} 個平台於 {scheduled_at:%Y-%m-%d %H:%M} 發布")
-        return redirect(url_for("article_detail", article_id=article_id))
-
-    @app.route("/job/<int:job_id>/cancel", methods=["POST"])
-    def job_cancel(job_id: int):
-        with Session() as session:
-            job = session.get(PublishJob, job_id)
-            if job and job.status == "pending":
-                job.status = "canceled"
-                session.commit()
-                flash("排程已取消")
-            article_id = job.article_id if job else None
-        if article_id:
-            return redirect(url_for("article_detail", article_id=article_id))
-        return redirect(url_for("index"))
 
     # ------------------------------------------------------------- 來源管理
     @app.route("/sources", methods=["GET", "POST"])
@@ -199,41 +199,29 @@ def create_app() -> Flask:
                 flash("預設來源不可刪除，可改為停用")
         return redirect(url_for("sources"))
 
-    # ------------------------------------------------------------- 平台管理
-    @app.route("/platforms", methods=["GET", "POST"])
-    def platforms():
-        with Session() as session:
-            if request.method == "POST":
-                name = request.form.get("name", "").strip()
-                cred_key = request.form.get("credential_key", "").strip().upper()
-                webhook = request.form.get("webhook_url", "").strip()
-                if name and cred_key:
-                    session.add(
-                        Platform(
-                            name=name, type="custom", credential_key=cred_key,
-                            enabled=True,
-                            config={"webhook_url": webhook} if webhook else None,
-                        )
-                    )
-                    session.commit()
-                    flash("已新增自訂平台")
-                return redirect(url_for("platforms"))
-            items = session.query(Platform).order_by(Platform.id).all()
-        return render_template("platforms.html", items=items)
-
-    @app.route("/platforms/<int:platform_id>/toggle", methods=["POST"])
-    def platform_toggle(platform_id: int):
-        with Session() as session:
-            p = session.get(Platform, platform_id)
-            if p:
-                p.enabled = not p.enabled
-                session.commit()
-        return redirect(url_for("platforms"))
-
     # --------------------------------------------------------- 媒體檔案服務
     @app.route("/media/<path:filename>")
     def media_file(filename: str):
         return send_from_directory(MEDIA_DIR, filename)
+
+    @app.route("/media/<int:media_id>/delete", methods=["POST"])
+    def media_delete(media_id: int):
+        from pathlib import Path
+        from . import gdrive
+        from .db import ArticleMedia
+        with Session() as session:
+            m = session.get(ArticleMedia, media_id)
+            if not m:
+                abort(404)
+            article_id = m.article_id
+            if m.gdrive_file_id:
+                gdrive.delete_file(m.gdrive_file_id)
+            elif m.local_path:
+                Path(m.local_path).unlink(missing_ok=True)
+            session.delete(m)
+            session.commit()
+            flash("圖片已刪除")
+        return redirect(url_for("article_detail", article_id=article_id))
 
     # -------------------------------------------------- 手動觸發圖片生成
     @app.route("/article/<int:article_id>/generate_images", methods=["POST"])

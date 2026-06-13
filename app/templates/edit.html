@@ -35,10 +35,10 @@
       <span class="badge {{ a.status }}" style="font-size:.85rem;">{{ STATUS_LABELS[a.status] }}</span>
       {% set pdf_media = a.media | selectattr('media_type', 'equalto', 'pdf') | list %}
       {% if pdf_media %}
-        <a class="button ghost" href="{{ pdf_media[0].url }}" target="_blank" rel="noopener"
+        <a class="button ghost" href="{{ pdf_media[0].url | safe_url }}" target="_blank" rel="noopener"
            style="font-size:.82rem; padding:.3rem .7rem;">原文 PDF</a>
       {% else %}
-        <a class="button ghost" href="{{ a.url }}" target="_blank" rel="noopener"
+        <a class="button ghost" href="{{ a.url | safe_url }}" target="_blank" rel="noopener"
            style="font-size:.82rem; padding:.3rem .7rem;">原始網頁</a>
       {% endif %}
     </div>
@@ -121,52 +121,6 @@
   </div>{# /右欄 #}
 </div>{# /split #}
 
-{# ── 排程發布 ── #}
-<details class="card" style="padding:.8rem 1.2rem; margin-top:1rem;">
-  <summary style="cursor:pointer; font-weight:600; color:#334155; user-select:none;">排程發布</summary>
-  <div style="margin-top:.8rem;">
-    <form method="post" action="{{ url_for('article_schedule', article_id=a.id) }}">
-      <label>發布平台（可複選）</label>
-      {% for p in platforms %}
-        <label style="display:inline-flex; gap:.3rem; margin-right:1rem;">
-          <input type="checkbox" name="platform_ids" value="{{ p.id }}"> {{ p.name }}（{{ p.type }}）
-        </label>
-      {% else %}
-        <p class="muted">尚無啟用的平台，請至「發布平台」頁設定。</p>
-      {% endfor %}
-      <label>發布時間</label>
-      <input type="datetime-local" name="scheduled_at" style="max-width:280px">
-      <div style="margin-top:.6rem;">
-        <button type="submit">建立排程</button>
-        <span class="muted">（需為「上架」狀態）</span>
-      </div>
-    </form>
-    {% if jobs %}
-    <table style="margin-top:1rem;">
-      <tr><th>平台</th><th>排定時間</th><th>狀態</th><th>結果</th><th></th></tr>
-      {% for j in jobs %}
-      <tr>
-        <td>{{ j.platform.name }}</td>
-        <td>{{ j.scheduled_at.strftime('%Y-%m-%d %H:%M') }}</td>
-        <td><span class="badge {{ j.status }}">{{ j.status }}</span></td>
-        <td class="muted">
-          {% if j.posted_url %}<a href="{{ j.posted_url }}" target="_blank" rel="noopener">貼文連結</a>{% endif %}
-          {{ j.result_message or '' }}
-        </td>
-        <td>
-          {% if j.status == 'pending' %}
-          <form class="inline" method="post" action="{{ url_for('job_cancel', job_id=j.id) }}">
-            <button class="ghost" type="submit">取消</button>
-          </form>
-          {% endif %}
-        </td>
-      </tr>
-      {% endfor %}
-    </table>
-    {% endif %}
-  </div>
-</details>
-
 {# ── 媒體素材 ── #}
 {% set variant_imgs = a.media | selectattr('media_type', 'equalto', 'image') | selectattr('variant') | list %}
 <details class="card" style="padding:.8rem 1.2rem;">
@@ -209,19 +163,30 @@
   {# 媒體清單 #}
   {% if a.media %}
   <table style="margin-top:.5rem; font-size:.85rem;">
-    <tr><th>類型</th><th>規格</th><th>網址／路徑</th><th>來源標註</th></tr>
+    <tr><th>類型</th><th>規格</th><th>網址／路徑</th><th>來源標註</th><th></th></tr>
     {% for m in a.media %}
     <tr>
       <td>{{ m.media_type }}</td>
       <td class="muted">{{ m.variant or '—' }}</td>
       <td>
-        {% if m.url.startswith('http') or m.url.startswith('/media/') %}
-          <a href="{{ m.url }}" target="_blank" rel="noopener">{{ m.url[:70] }}</a>
+        {% set safe = m.url | safe_url %}
+        {% set is_local = m.url and m.url.startswith('/media/') %}
+        {% if safe != '#' or is_local %}
+          <a href="{{ m.url if is_local else safe }}" target="_blank" rel="noopener">{{ m.url[:70] }}</a>
         {% else %}
           <span class="muted">{{ m.url[:70] }}</span>
         {% endif %}
       </td>
       <td class="muted">{{ m.attribution }}</td>
+      <td>
+        {% if m.media_type == 'image' %}
+        <form class="inline" method="post"
+              action="{{ url_for('media_delete', media_id=m.id) }}"
+              onsubmit="return confirm('確定刪除此圖片？');">
+          <button class="icon-btn danger" type="submit" title="刪除">🗑</button>
+        </form>
+        {% endif %}
+      </td>
     </tr>
     {% endfor %}
   </table>
@@ -233,6 +198,9 @@
 <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"
         integrity="sha384-948ahk4ZmxYVYOc+rxN1H2gM1EJ2Duhp7uHtZ4WSLkV4Vtx5MUqnV+l7u9B+jFv+"
         crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"
+        integrity="sha384-JEyTNhjM6R1ElGoJns4U2Ln4ofPcqzSsynQkmEc/KGy6336qAZl70tDLufbkla+3"
+        crossorigin="anonymous"></script>
 <script>
 const socialTA    = document.getElementById('content_zh');
 const researchTA  = document.getElementById('content_research');
@@ -241,8 +209,12 @@ const previewLabel= document.getElementById('preview-label');
 let   currentMode = 'social';
 
 function renderPreview() {
+  if (typeof DOMPurify === 'undefined' || typeof marked === 'undefined') {
+    previewPane.textContent = '[預覽不可用：安全模組載入失敗]';
+    return;
+  }
   const src = currentMode === 'social' ? socialTA : researchTA;
-  previewPane.innerHTML = marked.parse(src.value);
+  previewPane.innerHTML = DOMPurify.sanitize(marked.parse(src.value));
 }
 
 // 模式切換

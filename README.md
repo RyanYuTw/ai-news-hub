@@ -1,31 +1,27 @@
 # AI 前線觀測站（AI News Hub）
 
-蒐集 AI 論文與相關資訊 → 轉譯為繁體中文 → 後台管理 → 排程自動發布至社群平台。
+蒐集 AI 論文與相關資訊 → 以 NotebookLM 轉譯為繁體中文 → 後台管理與編輯。
 
 - 資料庫：MySQL（`ai_news_hub`，連線經 `~/.my.cnf`，無明文密碼）
-- 語言：Python 3.13（Flask + SQLAlchemy + APScheduler + Anthropic SDK）
+- 語言：Python 3.13（Flask + SQLAlchemy + APScheduler）
 
 ## 功能總覽
 
-| 需求 | 實作 |
+| 功能 | 說明 |
 |---|---|
-| 1.1 預設/自訂來源，RSS 優先、無 RSS 解析網頁 | `app/collectors.py`（rss / html / arxiv_api 三種處理器，後台可新增自訂來源） |
-| 1.2 全文優先，3 次失敗改用摘要 | `fetch_fulltext()` 重試 3 次，`is_fulltext` / `fetch_attempts` 記錄 |
-| 1.3 預設來源 | arXiv cs.AI（官方 API）、Nature Machine Intelligence、JAIR、Artificial Intelligence Review（Springer），均以 RSS/API 蒐集 |
-| 1.4 PDF 轉 md/txt、去重、標註來源 | pypdf 轉文字；`url_hash`（SHA-256）唯一索引去重；`attribution` 欄位 |
-| 1.5 / 1.6 繁中轉譯、可發布內容 | `app/translator.py`：一律使用 NotebookLM（需設定 `NOTEBOOKLM_NOTEBOOK_ID` + `nlm` CLI）。有 PDF 時 Gemini 直讀檔案；無 PDF 則自動產生暫存 TXT 檔上傳翻譯。已停用 Ollama 與 Claude 後端。 |
-| 1.7 圖片/影音標註來源 | `article_media` 表含 `attribution` |
-| 1.8 分頁列表、編輯、預覽、上下架、排程自動發布 | Flask 後台 + APScheduler |
-| 2.1 / 2.2 FB / IG / Threads / YouTube + 自訂平台 | `app/publishers.py`（官方 API；自訂平台走 Webhook） |
-| 2.3 粉專名稱 | **AI 前線觀測站**（帳號申請步驟見 `docs/social_setup.md`，平台規定禁止自動開帳號） |
-| 2.4 憑證隱藏檔 + 變數讀取 | `~/.ai_news_hub/credentials`（chmod 600）→ 環境變數 |
-| 3 Schema 自動規劃 | `schema.sql`（僅操作 `ai_news_hub`，不觸碰其他資料庫） |
+| 多來源蒐集 | RSS、arXiv API、HTML 解析三種模式；後台可新增自訂來源 |
+| 全文優先 | 嘗試 3 次抓全文，失敗改用摘要（`is_fulltext` 記錄） |
+| PDF 處理 | 偵測 PDF 連結，`local_path` 存直接下載 URL（無需落地） |
+| NotebookLM 翻譯 | 有 PDF：`nlm source add --url`；無 PDF：暫存 TXT 上傳；翻譯後自動刪除 source |
+| 圖片生成 | 從原始圖片或 PDF 第一頁裁切出三種規格（1080x1080 / 1080x1350 / 1920x1080） |
+| Google Drive 同步 | 翻譯文字檔 → `ai_news_hub/txt`；生成圖片 → `ai_news_hub/images`（上架後自動刪除） |
+| 後台管理 | 文章列表、編輯、Markdown 即時預覽、狀態切換、手動翻譯／重新生成圖片 |
+| 來源管理 | 後台新增／停用蒐集來源 |
+| 排程器 | APScheduler：定時蒐集（預設每 2 小時）、定時翻譯（預設每 30 分鐘一篇） |
 
 ## 快速開始
 
 ```bash
-cd ai_news_hub
-
 # 1. 建立資料庫（已執行過可略）
 mysql < schema.sql
 
@@ -33,56 +29,81 @@ mysql < schema.sql
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
-# 3. 設定憑證（Claude 翻譯需 ANTHROPIC_API_KEY；預設用本機 Ollama 無需 API key；社群發布見 docs/social_setup.md）
+# 3. 設定憑證
 mkdir -p ~/.ai_news_hub
 cp credentials.example ~/.ai_news_hub/credentials
 chmod 600 ~/.ai_news_hub/credentials
 
-# 4. 啟動後台（含排程器：預設每 2 小時整點蒐集、每 30 分鐘翻譯一篇、每分鐘檢查發布排程，均改為 Cron 設定）
+# 4. 啟動後台
 .venv/bin/python run.py
-# → http://127.0.0.1:5000
+# → http://127.0.0.1:5001
 ```
 
-### CLI
+## 憑證設定（`~/.ai_news_hub/credentials`）
 
 ```bash
-.venv/bin/python collect.py --limit 10            # 手動蒐集
-.venv/bin/python collect.py --translate           # 蒐集後進行翻譯（使用 NotebookLM）
-COLLECT_CRON="0 * * * *" .venv/bin/python run.py      # 調整蒐集排程（例如改為每整點蒐集一次）
-TRANSLATE_CRON="*/15 * * * *" .venv/bin/python run.py   # 調整翻譯排程（例如改為每 15 分鐘翻譯一篇）
+# NotebookLM（必填）
+NOTEBOOKLM_NOTEBOOK_ID=<notebook UUID>
+
+# Google Drive（選填，未設定時圖片/文字存本機）
+GDRIVE_TXT_FOLDER_ID=<ai_news_hub/txt 資料夾 ID>
+GDRIVE_IMAGES_FOLDER_ID=<ai_news_hub/images 資料夾 ID>
+
+# 蒐集/翻譯排程（選填，使用預設可不填）
+COLLECT_CRON=0 */2 * * *
+TRANSLATE_CRON=*/30 * * * *
 ```
+
+### Google Drive 設定步驟
+
+1. Google Cloud Console 建立服務帳戶 → 啟用 Drive API → 下載 JSON 金鑰
+2. 將金鑰存至 `~/.ai_news_hub/gdrive_service_account.json`（chmod 600）
+3. 在 Drive 建立 `ai_news_hub/txt` 和 `ai_news_hub/images` 資料夾
+4. 將服務帳戶 email（JSON 內 `client_email`）加為兩個資料夾的「編輯者」
+5. 在 credentials 填入兩個資料夾 ID
 
 ## 使用流程
 
 1. **蒐集**：排程自動執行，或後台點「立即蒐集＋翻譯」。新文章狀態為「待翻譯」。
-2. **翻譯**：自動翻譯為繁中貼文（狀態→「已翻譯」），也可在文章頁手動重翻：
-   - 僅支援 **notebooklm** 翻譯：需 `NOTEBOOKLM_NOTEBOOK_ID`（NotebookLM notebook UUID）+ `nlm` CLI。有 PDF 時直讀 PDF 原文，無 PDF 則自動產生暫存 TXT 檔上傳翻譯，翻譯完成後自動刪除暫存檔與 NotebookLM source。已停用 Ollama 與 Claude 後端。
-3. **編輯／預覽**：文章頁左側編輯 Markdown、右側即時預覽，確認後將狀態設為「**上架**」。
-4. **排程發布**：選擇平台（可複選）與時間建立排程；時間一到由排程器自動發布，結果（貼文連結／失敗原因）記錄在排程列表。
+2. **翻譯**：排程自動翻譯（每次一篇），或在文章頁手動觸發。
+   - 有 PDF 連結：直接以 `--url` 送 NotebookLM，不落地
+   - 無 PDF：原文暫存為 TXT 上傳，翻譯後刪除
+   - 翻譯完成後：繁中內容寫入資料庫，同步上傳 TXT 至 Drive（`ai_news_hub/txt`）
+3. **圖片生成**：翻譯完成後自動生成三種規格圖片，上傳至 Drive（`ai_news_hub/images`）。亦可在文章頁手動重新生成。
+4. **編輯／預覽**：文章頁左側編輯 Markdown，右側即時預覽。
+5. **上架**：狀態改為「上架」時，Drive 上的圖片自動刪除（已複製使用後不再需要）。
+
+## 資料庫 Schema
+
+| 資料表 | 說明 |
+|---|---|
+| `sources` | 蒐集來源（RSS / arXiv API / HTML） |
+| `articles` | 文章本體（原文、繁中翻譯、狀態） |
+| `article_media` | 文章媒體（圖片、PDF）；`local_path` 存 PDF 下載 URL；`gdrive_file_id` 存圖片 Drive ID |
 
 ## 專案結構
 
 ```
 ai_news_hub/
-├── schema.sql              # MySQL schema + 預設來源/平台
+├── schema.sql              # MySQL schema + 預設來源
 ├── run.py                  # Web 後台 + 排程器入口
 ├── collect.py              # 手動蒐集 CLI
-├── credentials.example     # 憑證範本（真實憑證放 ~/.ai_news_hub/credentials）
-├── docs/social_setup.md    # 各社群平台帳號/API 申請指南
+├── credentials.example     # 憑證範本
 └── app/
-    ├── config.py           # 設定與隱藏檔憑證載入
+    ├── config.py           # 設定與憑證載入
     ├── db.py               # SQLAlchemy 模型（經 ~/.my.cnf 連線）
-    ├── collectors.py       # RSS / arXiv API / HTML 蒐集、PDF→md、去重
-    ├── translator.py       # 繁中翻譯（一律使用 NotebookLM 直讀 PDF 或原文 TXT 暫存檔，翻譯後自動刪除本機與 NotebookLM 暫存資源）
-    ├── publishers.py       # FB / IG / Threads / YouTube / 自訂 Webhook
-    ├── scheduler.py        # APScheduler：定時任務排程器（改為 Cron 設定方式）
-    ├── web.py              # Flask 後台
+    ├── gdrive.py           # Google Drive 上傳／刪除（Service Account）
+    ├── collectors.py       # RSS / arXiv API / HTML 蒐集、PDF 連結偵測、去重
+    ├── translator.py       # NotebookLM 翻譯、Drive TXT 上傳
+    ├── image_processor.py  # 三規格圖片生成、Drive 上傳
+    ├── scheduler.py        # APScheduler 排程（蒐集、翻譯、PDF 清理）
+    ├── web.py              # Flask 後台路由
     └── templates/          # 後台頁面
 ```
 
 ## 安全事項
 
 - 資料庫連線一律走 `~/.my.cnf`，程式與設定檔無明文密碼。
-- 社群/API 憑證僅存於 `~/.ai_news_hub/credentials`（隱藏檔、chmod 600），以環境變數讀取，不入庫、不進 log。
-- Schema 只建立與操作 `ai_news_hub` 資料庫，刪除操作僅限本系統資料表，且來源預設項目不可刪除（僅能停用）。
-- 各平台**帳號申請需手動完成**（平台條款禁止自動開帳號），步驟見 `docs/social_setup.md`；申請一次後即可全自動發布。
+- 所有 API 憑證僅存於 `~/.ai_news_hub/credentials`（隱藏檔、chmod 600），以環境變數讀取，不入庫、不進 log。
+- Drive 服務帳戶 JSON 金鑰存於 `~/.ai_news_hub/gdrive_service_account.json`，已加入 `.gitignore`。
+- Schema 只建立與操作 `ai_news_hub` 資料庫；預設來源不可刪除（僅能停用）。

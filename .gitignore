@@ -1,5 +1,8 @@
 # 敏感憑證
 credentials
+gdrive_service_account.json
+gdrive_oauth_client.json
+gdrive_token.json
 
 # 資料庫
 *.db

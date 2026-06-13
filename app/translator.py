@@ -10,7 +10,10 @@ import logging
 import re
 import subprocess
 
+import datetime as dt
+
 from .config import (
+    GDRIVE_TXT_FOLDER_ID,
     NOTEBOOKLM_NOTEBOOK_ID,
 )
 from .db import Article, ArticleMedia, Session
@@ -52,15 +55,17 @@ def _nlm_run(*args: str) -> subprocess.CompletedProcess:
     return subprocess.run(["nlm", *args], capture_output=True, text=True, check=True)
 
 
-def _nlm_translate_file(file_path: str) -> tuple[str, str, str]:
-    """上傳檔案至 NotebookLM，取得繁中標題、社群貼文、學術研究筆記後刪除 source。"""
+def _nlm_translate_file(source: str) -> tuple[str, str, str]:
+    """將 PDF URL 或本機文字檔加入 NotebookLM，取得繁中標題、社群貼文、學術研究筆記後刪除 source。"""
     if not NOTEBOOKLM_NOTEBOOK_ID:
         raise RuntimeError(
             "NotebookLM 翻譯需設定 NOTEBOOKLM_NOTEBOOK_ID，"
             "請在 ~/.ai_news_hub/credentials 加入此變數。"
         )
-    # 上傳檔案 (PDF 或 TXT)
-    result = _nlm_run("source", "add", NOTEBOOKLM_NOTEBOOK_ID, "--file", file_path, "--wait")
+    if source.startswith("http"):
+        result = _nlm_run("source", "add", NOTEBOOKLM_NOTEBOOK_ID, "--url", source, "--wait")
+    else:
+        result = _nlm_run("source", "add", NOTEBOOKLM_NOTEBOOK_ID, "--file", source, "--wait")
     m = re.search(r"Source ID:\s*([0-9a-f-]{36})", result.stdout)
     if not m:
         raise RuntimeError(f"無法從 nlm 輸出解析 source ID：{result.stdout}")
@@ -89,6 +94,37 @@ def _nlm_translate_file(file_path: str) -> tuple[str, str, str]:
             log.warning("NotebookLM source 清除失敗（%s）：%s", source_id, exc)
 
 
+def _upload_translated_txt(article: Article) -> None:
+    """將翻譯結果以「英文標題_日期.txt」上傳至 Drive TXT 資料夾。"""
+    from . import gdrive
+
+    if not gdrive.is_available():
+        return
+    date_str = (article.published_at or article.created_at or dt.datetime.now()).strftime("%Y-%m-%d")
+    safe_title = re.sub(r'[\\/:*?"<>|]', "_", article.title).strip()[:120]
+    filename = f"{safe_title}_{date_str}.txt"
+    def _strip_md(text: str) -> str:
+        text = re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
+        text = re.sub(r"\*{1,3}(.+?)\*{1,3}", r"\1", text)
+        text = re.sub(r"_{1,2}(.+?)_{1,2}", r"\1", text)
+        text = re.sub(r"^[-*]\s+", "", text, flags=re.MULTILINE)
+        text = re.sub(r"^\d+\.\s+", "", text, flags=re.MULTILINE)
+        text = re.sub(r"`(.+?)`", r"\1", text)
+        return text.strip()
+
+    parts: list[str] = [article.title]
+    if article.title_zh:
+        parts.append(article.title_zh)
+    if article.content_research:
+        parts += ["", _strip_md(article.content_research)]
+    data = "\n".join(parts).encode("utf-8")
+    try:
+        gdrive.upload_bytes(data, filename, "text/plain", folder_id=GDRIVE_TXT_FOLDER_ID or None)
+        log.info("翻譯結果已上傳 Drive：%s", filename)
+    except Exception as exc:
+        log.warning("翻譯結果上傳 Drive 失敗（不影響翻譯）：%s", exc)
+
+
 def _generate_images(article_id: int, pdf_path: str | None = None) -> None:
     """呼叫圖片處理模組；失敗時僅記錄 warning，不中斷翻譯流程。"""
     try:
@@ -99,16 +135,24 @@ def _generate_images(article_id: int, pdf_path: str | None = None) -> None:
 
 
 def _delete_local_pdf(pdf_media: ArticleMedia) -> None:
-    """刪除 media_files 目錄下的 PDF 檔，並清空 local_path 欄位。"""
+    """翻譯完成後清除 PDF 記錄的路徑欄位（local_path 現在存 PDF URL，無需刪檔）。
+    相容舊格式：若 local_path 為本機路徑則嘗試刪除。
+    """
     from pathlib import Path
+    from . import gdrive
 
-    path = Path(pdf_media.local_path)
-    try:
-        path.unlink(missing_ok=True)
-        log.info("已刪除本機 PDF：%s", path)
-    except OSError as exc:
-        log.warning("刪除本機 PDF 失敗（%s）：%s", path, exc)
+    if pdf_media.local_path and not pdf_media.local_path.startswith("http"):
+        path = Path(pdf_media.local_path)
+        try:
+            path.unlink(missing_ok=True)
+            log.info("已刪除本機 PDF：%s", path)
+        except OSError as exc:
+            log.warning("刪除本機 PDF 失敗（%s）：%s", path, exc)
     pdf_media.local_path = None
+
+    if pdf_media.gdrive_file_id:
+        gdrive.delete_file(pdf_media.gdrive_file_id)
+        pdf_media.gdrive_file_id = None
 
 
 def translate_article(article_id: int) -> bool:
@@ -133,6 +177,7 @@ def translate_article(article_id: int) -> bool:
                 article.content_research = f"{research}\n\n---\n{article.attribution}"
                 article.status = "translated"
                 session.commit()
+                _upload_translated_txt(article)
                 # 圖片生成後再刪 PDF，確保可截取第一頁
                 _generate_images(article.id, pdf_media.local_path)
                 _delete_local_pdf(pdf_media)
@@ -155,6 +200,7 @@ def translate_article(article_id: int) -> bool:
                     article.content_research = f"{research}\n\n---\n{article.attribution}"
                     article.status = "translated"
                     session.commit()
+                    _upload_translated_txt(article)
                     _generate_images(article.id)
                     log.info("已翻譯文章 #%s（NotebookLM 文字）：%s", article.id, article.title_zh)
                     return True

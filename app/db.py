@@ -8,7 +8,7 @@ from __future__ import annotations
 import datetime as dt
 
 from sqlalchemy import (
-    JSON, BigInteger, Boolean, DateTime, Enum, ForeignKey, Integer,
+    BigInteger, Boolean, DateTime, Enum, ForeignKey, Integer,
     String, Text, create_engine, func,
 )
 from sqlalchemy.dialects.mysql import LONGTEXT
@@ -79,9 +79,6 @@ class Article(Base):
     media: Mapped[list["ArticleMedia"]] = relationship(
         back_populates="article", cascade="all, delete-orphan"
     )
-    jobs: Mapped[list["PublishJob"]] = relationship(
-        back_populates="article", cascade="all, delete-orphan"
-    )
 
 
 class ArticleMedia(Base):
@@ -92,6 +89,7 @@ class ArticleMedia(Base):
     media_type: Mapped[str] = mapped_column(Enum("image", "video", "audio", "pdf"))
     url: Mapped[str] = mapped_column(String(1000))
     local_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    gdrive_file_id: Mapped[str | None] = mapped_column(String(500), nullable=True)
     attribution: Mapped[str] = mapped_column(String(1000), default="")
     variant: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
@@ -99,34 +97,3 @@ class ArticleMedia(Base):
     article: Mapped[Article] = relationship(back_populates="media")
 
 
-class Platform(Base):
-    __tablename__ = "platforms"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(255))
-    type: Mapped[str] = mapped_column(String(50))
-    credential_key: Mapped[str] = mapped_column(String(100), unique=True)
-    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
-    config: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
-
-    jobs: Mapped[list["PublishJob"]] = relationship(back_populates="platform")
-
-
-class PublishJob(Base):
-    __tablename__ = "publish_jobs"
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    article_id: Mapped[int] = mapped_column(ForeignKey("articles.id"))
-    platform_id: Mapped[int] = mapped_column(ForeignKey("platforms.id"))
-    scheduled_at: Mapped[dt.datetime] = mapped_column(DateTime)
-    status: Mapped[str] = mapped_column(
-        Enum("pending", "processing", "done", "failed", "canceled"), default="pending"
-    )
-    result_message: Mapped[str | None] = mapped_column(String(2000), nullable=True)
-    posted_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    executed_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[dt.datetime] = mapped_column(DateTime, server_default=func.now())
-
-    article: Mapped[Article] = relationship(back_populates="jobs")
-    platform: Mapped[Platform] = relationship(back_populates="jobs")
